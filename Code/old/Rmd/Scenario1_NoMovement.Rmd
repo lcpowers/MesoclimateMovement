@@ -1,0 +1,118 @@
+---
+title: "Scenario 1"
+author: "Claire Powers"
+date: "2024-02-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Scenario 1
+### - No movement between subpopulations/mesocliamtes
+### - Cliamte varies through time
+### - Part A: Aspect magnitude does not vary through time
+### - Part B: Aspect magnitude does vary through time
+
+1) Set up
+```{r params_funs}
+
+rm(list=ls()) 
+library(tidyverse)
+
+source("Code/R/survival_fun.R")
+source("Code/R/logit2prob.R")
+source("Code/R/growth_fun.R")
+source("Code/R/seednum_fun.R")
+source("Code/R/SG_mx_fun.R")
+source("Code/R/subpop_mx_fun.R")
+theme_set(theme_bw(base_size=14))
+stage.cols = c(sdlg="springgreen4",juv="slateblue3",flrg="magenta3")
+asp.cols = c(`-1`="dodgerblue3",`0`="goldenrod2",`1`="firebrick")
+```
+
+2) Parameters
+```{r startParams}
+n.subpops = 3
+sims = 100
+years = 100
+
+sizes = c(sdlg=1,juv=5,flrg=10)
+P.flr = 0.8 # Probability of flowering
+P.germ = 0.01 # Probability of seeds germinatings
+seeds=685
+
+surv_params = list(sizes=sizes,
+                   survival.rates = c(sdlg = 0.2,juv=0.75,flrg=0.95),
+                   S_c = c(-0.02,-0.01,0.0),
+                   S_d = c(-0.08,-0.05,-0.03),
+                   clim=0,S.asp.effect=0,S.asp.mag=0)
+
+growth_params = list(sizes=sizes,
+                     growth.rates = c(sdlg=0.1,juv=0.45),
+                     G_c = c(0.001,0.001),
+                     G_d = c(-0.0035,-0.0025),
+                     clim=0,G.asp.effect=0,G.asp.mag=0)
+
+```
+
+
+3) Part A: The magnitude of the aspect effect is constant through time and symmetrical. Climate varies through time
+```{r partA}
+
+# coords of [1,1] cell for each subpop within G mx
+start.cells = seq(1,n.subpops*3,by=3)
+asp.mags = seq(0,5,by=0.5)
+clim.sds = seq(0.1,5,length.out=sims)
+asp.effs = c(-1,0.00001,1)
+
+for(sim in 1:sims){
+  
+  clim.sd = clim.sds[sim]
+  full.df = data.frame(year=1:years,clim=rnorm(years,sd=clim.sd)) %>% 
+    expand_grid(.,asp.mags) %>% 
+    mutate(lambda=NA)
+  
+  for(a.mag in asp.mags){
+    
+    # Set the value of the magnitude of the aspect effect
+    growth_params$G.asp.mag=surv_params$S.asp.mag=a.mag
+    
+    for(yr in 1:years){
+      
+      # Get the regional climate value for that year
+      surv_params$clim = growth_params$clim = full.df$clim[yr]
+      
+      # Start new zero mx
+      pop_mx = matrix(data = 0,ncol = 3*n.subpops,nrow=3*n.subpops)
+      
+      for(i in 1:n.subpops){ ## This loop builds the G matrix each year...should this be a function?
+        
+        start.cell = start.cells[i]
+        growth_params$G.asp.effect = surv_params$S.asp.effect = asp.effs[i]
+        
+        # get subpop i mx
+        m_i = subpop_mx_fun(surv_params = surv_params,growth_params = growth_params,seeds=seeds)$subpop_mx
+        Re(eigen(m_i)$values[1])
+        
+        # put into g.mx
+        pop_mx[(0+start.cell):(2+start.cell),(0+start.cell):(2+start.cell)]=m_i
+        
+        # remove to avoid mistakes
+        rm(m_i,i,start.cell)
+        } # End loop that builds mx each year
+      
+      full.df$lambda[full.df$year==yr & full.df$asp.mags==a.mag]=Re(eigen(pop_mx)$values[1])
+    }
+  }
+}
+
+```
+
+
+
+
+
+
+

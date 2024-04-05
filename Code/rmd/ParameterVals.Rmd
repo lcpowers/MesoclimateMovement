@@ -1,0 +1,134 @@
+---
+title: "Setting parameter values"
+author: "Claire Powers"
+date: "2024-03-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r start}
+library(tidyverse)
+rm(list=ls())
+theme_set(theme_bw(base_size=14))
+stage.cols = c(sdlg="springgreen4",juv="blue3",flrg="magenta3")
+sizes = c(sdlg=1,juv=5,flrg=10)
+```
+
+1) survival function parameters
+```{r surv_fun}
+source("Code/r/logit2prob.R")
+source("Code/r/survival_fun.R")
+
+# params for base matrix
+surv_params = list(sizes=sizes,
+                   survival.rates = c(sdlg = 0.1,juv=0.75,flrg=0.95),
+                   S_c = c(-0.02,-0.01,0.0),
+                   S_d = c(-0.08,-0.04,-0.05),
+                   S.asp.mag = 0,
+                   S.asp.effect = 0,
+                   clim = 0)
+
+# look at survival across a range of regional climate values
+surv.clim = data.frame(clim = seq(-5,5,by=0.1),
+                       sdlg=NA,
+                       juv=NA,
+                       flrg=NA)
+
+for(i in 1:nrow(surv.clim)){
+  
+    surv_params$clim = surv.clim$clim[i]
+    s.rates = do.call(survival_fun,surv_params)
+    surv.clim[i,2:4]=s.rates
+  
+}
+
+plot.df = pivot_longer(surv.clim,cols = !clim, names_to = "stage",values_to = "s.rate")
+ggplot(plot.df,aes(x=clim,y=s.rate,color=stage))+
+  geom_line()+
+  scale_color_manual(values=stage.cols)+
+  scale_y_continuous(limits = c(0,1))
+
+rm(i)
+```
+
+2) growth function parameters
+```{r growth_fun}
+source("Code/r/growth_fun.R")
+
+# params for base matrix
+growth_params = list(sizes=sizes,
+                     growth.rates = c(sdlg=0.1,juv=0.4),
+                     G_c = c(0.001,0.001),
+                     G_d = c(-0.0035,-0.0025),
+                     G.asp.mag = 0,
+                     G.asp.effect = 0,
+                     clim = 0)
+
+# look at survival across a range of regional climate values
+grow.clim = data.frame(clim = seq(-5,5,by=0.1),
+                       sdlg=NA,
+                       juv=NA)
+
+for(i in 1:nrow(grow.clim)){
+  
+    growth_params$clim = grow.clim$clim[i]
+    g.rates = do.call(growth_fun,growth_params)
+    grow.clim[i,2:3]=g.rates
+  
+}
+
+plot.df = pivot_longer(grow.clim,cols = !clim, names_to = "stage",values_to = "g.rate")
+ggplot(plot.df,aes(x=clim,y=g.rate,color=stage))+
+  geom_line()+
+  scale_color_manual(values=stage.cols)+
+  scale_y_continuous(limits = c(0,1))
+
+rm(i)
+```
+
+3) Seed number: To find the optimal seed number, build a mx with the survival and growth rates based on parameters in the two chunks above, then use the optim function to find the optimal seed number that gets lambda ~1.03
+```{r seednum}
+source("Code/r/SG_mx_fun.R")
+source("Code/r/seednum_fun.R")
+
+P.flr = 0.75 # Probability of flowering
+P.germ = 0.01 # Probability of seeds germinating
+
+growth_params = list(sizes=sizes,growth.rates = c(sdlg=0.1,juv=0.45),
+                     G_c = c(0.001,0.001),G_d = c(-0.0035,-0.0025),
+                     G.asp.mag = 0,G.asp.effect = 0,clim = 0)
+growth.rates = do.call(growth_fun,growth_params)
+
+surv_params = list(sizes=sizes,
+                   survival.rates = c(sdlg = 0.1,juv=0.75,flrg=0.95),
+                   S_c = c(-0.02,-0.01,0.0),
+                   S_d = c(-0.08,-0.04,-0.05),
+                   S.asp.mag = 0,S.asp.effect = 0,clim = 0)
+surv.rates = do.call(survival_fun,surv_params)
+
+# Get survival/growth matrix
+sg.mx = sg_mx_fun(surv.rates = surv.rates,growth.rates = growth.rates)
+# Run seednum_fun through optim function to fund the seed number that gets a lambda value of around 1.01
+seeds.optim = stats::optim(par = 100, fn = seednum_fun, method = "L-BFGS-B", lower=0, upper=10000,control = list(factr = 1e-15))
+# Save that seed number to the global enviroment
+seeds = round(seeds.optim$par)
+
+# Create a full 3x3 mx by adding the fecundity cell
+mx = sg.mx
+mx[1,3] = surv.rates["flrg"]*P.flr*seeds*P.germ
+Re(eigen(mx)$values[1])
+```
+
+4) Building a matrix for the full population
+```{r big_mx}
+source("Code/r/big_mx_fun.R")
+
+n.subpops=3
+pop_mx = big_mx_fun(surv_params=surv_params,growth_params=growth_params,seeds=seeds,n.subpops=n.subpops)
+Re(eigen(pop_mx)$values[1])
+
+```
+
